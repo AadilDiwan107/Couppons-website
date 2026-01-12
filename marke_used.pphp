@@ -1,0 +1,106 @@
+<?php
+// mark_used.php
+session_start();
+
+// Include database connection
+include 'includes/db.php';
+
+// Check if user is logged in
+if (!isset($_SESSION['user_id']) || !isset($_SESSION['username'])) {
+    http_response_code(401);
+    echo json_encode(['success' => false, 'message' => 'Not logged in']);
+    exit();
+}
+
+// Get POST data
+$input = json_decode(file_get_contents('php://input'), true);
+$coupon_id = $input['coupon_id'] ?? null;
+
+if ($coupon_id) {
+    // Start transaction for data consistency
+    $connection->begin_transaction();
+    
+    try {
+        // First, check if the coupon is active and get the user_id of the coupon owner
+        $stmt = $connection->prepare("SELECT user_id FROM coupons WHERE id = ? AND c_status = 'active'");
+        $stmt->bind_param("i", $coupon_id);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        
+        if ($result->num_rows > 0) {
+            $coupon_data = $result->fetch_assoc();
+            $coupon_owner_id = $coupon_data['user_id'];
+            
+            // Update coupon status to 'used'
+            $stmt = $connection->prepare("UPDATE coupons SET c_status = 'used' WHERE id = ? AND c_status = 'active'");
+            $stmt->bind_param("i", $coupon_id);
+            
+            if ($stmt->execute() && $stmt->affected_rows > 0) {
+                // Add points to the user who posted the coupon (1 or 2 points randomly)
+                $points_to_add = rand(1, 2);
+                
+                // Update user's points in the users table
+                $stmt = $connection->prepare("UPDATE users SET points = COALESCE(points, 0) + ? WHERE id = ?");
+                $stmt->bind_param("ii", $points_to_add, $coupon_owner_id);
+                
+                if ($stmt->execute()) {
+                    $connection->commit();
+                    echo json_encode([
+                        'success' => true, 
+                        'message' => 'Coupon marked as used',
+                        'points_added' => $points_to_add
+                    ]);
+                } else {
+                    throw new Exception('Failed to update user points');
+                }
+                
+                $stmt->close();
+            } else {
+                throw new Exception('Failed to update coupon');
+            }
+        } else {
+            throw new Exception('Coupon not found or already used');
+        }
+        
+        $stmt->close();
+    } catch (Exception $e) {
+        $connection->rollback();
+        echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+    }
+} else {
+    echo json_encode(['success' => false, 'message' => 'Invalid coupon ID']);
+}
+?>​<?php
+// mark_used.php
+session_start();
+
+// Include database connection
+include 'includes/db.php';
+
+// Check if user is logged in
+if (!isset($_SESSION['user_id']) || !isset($_SESSION['username'])) {
+    http_response_code(401);
+    echo json_encode(['success' => false, 'message' => 'Not logged in']);
+    exit();
+}
+
+// Get POST data
+$input = json_decode(file_get_contents('php://input'), true);
+$coupon_id = $input['coupon_id'] ?? null;
+
+if ($coupon_id) {
+    // Update coupon status to 'used'
+    $stmt = $connection->prepare("UPDATE coupons SET c_status = 'used' WHERE id = ? AND c_status = 'active'");
+    $stmt->bind_param("i", $coupon_id);
+    
+    if ($stmt->execute() && $stmt->affected_rows > 0) {
+        echo json_encode(['success' => true, 'message' => 'Coupon marked as used']);
+    } else {
+        echo json_encode(['success' => false, 'message' => 'Failed to update coupon']);
+    }
+    
+    $stmt->close();
+} else {
+    echo json_encode(['success' => false, 'message' => 'Invalid coupon ID']);
+}
+?>
